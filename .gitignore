@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.*
+*.log
+
+# audio/work artifacts
+imported/
+transcripts/
+*.wav
