@@ -85,11 +85,45 @@ review surface. Maybe later: distill the most-used features into an iOS app.
   almost certainly ignorable for our purposes.
 - Backlog as of first inspection: 23 clips, ~26 min, ~99 MB. Grows over time.
 
-## Prior art to mine
+## Prior art mined — `~/yapzap` (v0, works; reuse it)
 
-`~/yapzap` — an existing hand-rolled version: Obsidian vault + `import.sh` /
-`transcribe.sh` that transcribe recordings into markdown. Reveals the user's
-preferred toolchain and what already works. Mine it before reinventing.
+The boring-but-critical ingest+transcribe half is ALREADY built and tested.
+Port it; do not reinvent. What's proven and worth lifting:
+
+- **Auto-import on plug-in:** a `launchd` LaunchAgent (`com.yapzap.import`,
+  `StartOnMount=true`) fires `import.sh` on any volume mount. This IS the
+  "plug in recorder → it just loads" workflow — already solved.
+- **Idempotent import:** copies new wavs into `raw/YYYY/MM/` with `cp -p`
+  (preserves mtime, never mutates the device — device stays the hard backup),
+  dedups by existence, logs, fires a native macOS notification on completion.
+- **⚠️ THE landmine — the recorder writes BROKEN WAV headers (bad size fields)
+  + stereo.** `afinfo`/Core Audio refuse to open them. Fix (proven):
+  `ffmpeg -i in.wav -ac 1 -ar 16000 -c:a pcm_s16le out.wav` — repairs the
+  header AND downmixes to mono 16 kHz (Deepgram's preferred input). Without
+  this step, transcription chokes. This alone justified the dig.
+- **Deepgram batch call:** `nova-3` (newer than nova-2), `smart_format`,
+  `punctuate`, `Authorization: Token`, parse with `jq`, check HTTP code,
+  capture `duration` + `confidence`. Working integration to lift directly.
+- **Filename → ISO timestamp** parsing (`YYYYMMDD-HHMMSS`) already written.
+- **Per-yap metadata schema** (date, source, duration_sec, confidence, model,
+  transcribed_at) — good basis for the SQLite row model.
+
+What's MISSING in v0 = exactly this project's whole value-add: no LLM
+organization, no typing/separation of gold from rambling, no rediscovery
+surface, no formalization step. v0 just dumps raw transcript to Obsidian
+markdown (drop the Obsidian `![[...]]` embed — we're building our own surface).
+
+**Input texture (from real recordings, design the parser to this):**
+- Length varies wildly: 1 word / 3 s up to ~1000 words / 13.5 min. Handle both
+  quick one-liners and long multi-topic rambles.
+- A single yap mixes meta-commentary + the actual morsel + self-tagging
+  ("article idea…", "that's the premise", "here's one:") + attribution/caveats.
+  Separate the gold but PRESERVE the rambling (it's generative, per the thesis).
+- Some clips are noise/empty (confidence 0.0) — flag/skip, don't feed to the LLM.
+- The user's own 2026-05-13 recording literally articulates the verbalization/
+  externalization thesis ("forming the thought coherently into words is
+  constructive in itself… it helps bring it forth into the conscious mind").
+  The product premise is self-evident in the data.
 
 ## Decisions so far
 
