@@ -125,6 +125,46 @@ markdown (drop the Obsidian `![[...]]` embed — we're building our own surface)
   constructive in itself… it helps bring it forth into the conscious mind").
   The product premise is self-evident in the data.
 
+## Design principles (from cognitive-science research, 2026-06-13)
+
+Evidence-graded. These drive the build; the anti-patterns are things that
+would actively kill the creative flow.
+
+1. **Bulletproof capture is the foundation — not polish.** [STRONG] Offloading
+   frees the mind precisely *because* you stop holding the thought yourself —
+   but you then remember the offloaded item less well. So a tool that ever
+   silently loses an item loses a thought you no longer have anywhere.
+   Reliability is what makes offloading safe. Persist raw audio + raw
+   transcript before anything else touches them. NEVER a fire-and-forget
+   pipeline with no error surface.
+2. **Keep the raw ramble verbatim as the source of truth.** [STRONG] Incubation
+   + freely-moving mind-wandering genuinely turn rambling into insight; the
+   meander is where connective tissue forms. The LLM extracts gold as a *view*,
+   never destroys or "cleans up" the original. Don't summarize the rant away.
+3. **Build in incubation — resurface fragments after a deliberate gap.** [STRONG]
+   A delay (ideally low-load) measurably improves creative output, and the gap
+   is where the "I forgot I said that, it's brilliant" delight lives. Don't ship
+   a pure reverse-chron feed that buries everything older than today.
+4. **Enable recombination — atomic, juxtaposable fragments that collide.**
+   [MODERATE/historical] New ideas come from colliding old ones (commonplace
+   book → cut into cards → remix; zettelkasten links; combinatory play). Cluster
+   by theme; surface unexpected old pairs; a "cards on the table" view beats a
+   list. Don't silo each yap as an isolated note.
+5. **Zero organizing burden; calm, uncrowded surface.** [STRONG for ADHD] The
+   machine does the structure; the user makes no filing decisions. Friction is
+   the enemy at capture; structure is a gift, never a chore. No dense
+   options-everywhere productivity UI — it re-imposes the exact executive tax
+   the tool exists to remove.
+6. **Support explanatory re-verbalization in the formalize step.** [MODERATE]
+   Talking helps thinking specifically when it's *explanatory*, not mere
+   vocalizing. Let the user talk *back* at a fragment ("what's the angle, why is
+   this funny") as a threaded follow-up — that's how a premise becomes a bit.
+
+Weak/contested — do NOT design around these: the Zeigarnik "you'll remember
+unfinished things better" effect (2025 meta-analysis found no memory advantage;
+the usable part is only that closing a loop reduces felt overwhelm); freewriting
+/ morning pages (craft wisdom, not RCT-backed — cite as theory, not evidence).
+
 ## Decisions so far
 
 - **Build approach:** Pipeline-first. Build the ingest → transcribe → organize
