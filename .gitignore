@@ -12,6 +12,11 @@ __pycache__/
 .venv/
 venv/
 
+# macOS app — generated project + build output (project.yml is the source)
+macapp/Recorder.xcodeproj/
+macapp/build/
+macapp/DerivedData/
+
 # OS
 .DS_Store
 *.log

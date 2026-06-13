@@ -1,0 +1,32 @@
+name: Recorder
+options:
+  bundleIdPrefix: app.recorder
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    PRODUCT_NAME: Recorder
+    GENERATE_INFOPLIST_FILE: YES
+    # Menu-bar accessory app: no Dock icon, lives in the status bar.
+    INFOPLIST_KEY_LSUIElement: YES
+    # Local personal build: ad-hoc sign, no sandbox (it shells out to python
+    # and reads /Volumes/Recorder + the project dir).
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO
+
+targets:
+  Recorder:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    dependencies:
+      - sdk: libsqlite3.tbd
