@@ -52,3 +52,19 @@ def deepgram_api_key() -> str:
             f"{PROJECT_ROOT / '.env'} (see .env.example)."
         )
     return key
+
+
+def anthropic_api_key() -> str:
+    load_env()
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY not set. Add it to "
+            f"{PROJECT_ROOT / '.env'} (see .env.example)."
+        )
+    return key
+
+
+# The mind: Claude model + extraction prompt version.
+ORGANIZE_MODEL = "claude-opus-4-8"
+ORGANIZE_PROMPT_VERSION = "v1"

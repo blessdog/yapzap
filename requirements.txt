@@ -1,0 +1,4 @@
+# Slice 1 (ingest/transcribe) is stdlib-only and needs no packages.
+# Slice 2 (the mind) needs the Claude SDK + Pydantic for structured output.
+anthropic>=0.69
+pydantic>=2

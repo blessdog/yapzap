@@ -32,6 +32,7 @@ def cmd_stats(_args: argparse.Namespace) -> int:
     conn = db.connect(config.DB_PATH)
     try:
         counts = db.stats(conn)
+        frag_counts = db.fragment_type_counts(conn)
     finally:
         conn.close()
     if not counts:
@@ -41,6 +42,35 @@ def cmd_stats(_args: argparse.Namespace) -> int:
     print(f"{total} yap(s) in {config.DB_PATH}")
     for status, n in sorted(counts.items()):
         print(f"  {status:14} {n}")
+    if frag_counts:
+        print(f"{sum(frag_counts.values())} fragment(s):")
+        for t, n in sorted(frag_counts.items()):
+            print(f"  {t:14} {n}")
+    return 0
+
+
+def cmd_organize(args: argparse.Namespace) -> int:
+    from . import organize
+
+    print(f"Organizing with {config.ORGANIZE_MODEL} (prompt {organize.PROMPT_VERSION})")
+    report = organize.run(limit=args.limit)
+    print("Done:")
+    print(report.summary())
+    return 1 if report.errors else 0
+
+
+def cmd_fragments(args: argparse.Namespace) -> int:
+    conn = db.connect(config.DB_PATH)
+    try:
+        rows = db.recent_fragments(conn, type_=args.type, limit=args.limit)
+    finally:
+        conn.close()
+    for r in rows:
+        text = (r["text"] or "").replace("\n", " ")
+        if len(text) > 64:
+            text = text[:61] + "..."
+        captured = (r["captured_at"] or "?")[:10]
+        print(f"[{r['id']:>3}] {captured}  {r['type']:<9} {text}")
     return 0
 
 
@@ -94,6 +124,15 @@ def main(argv: list[str] | None = None) -> int:
     p_ing.set_defaults(func=cmd_ingest)
 
     sub.add_parser("stats", help="counts by status").set_defaults(func=cmd_stats)
+
+    p_org = sub.add_parser("organize", help="extract fragments from transcripts (LLM)")
+    p_org.add_argument("--limit", type=int, help="max yaps to organize")
+    p_org.set_defaults(func=cmd_organize)
+
+    p_frag = sub.add_parser("fragments", help="list extracted fragments")
+    p_frag.add_argument("--type", choices=["joke", "idea", "insight", "practical"])
+    p_frag.add_argument("--limit", type=int, default=50)
+    p_frag.set_defaults(func=cmd_fragments)
 
     p_list = sub.add_parser("list", help="recent yaps")
     p_list.add_argument("--limit", type=int, default=20)
