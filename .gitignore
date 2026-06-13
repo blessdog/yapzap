@@ -1,9 +1,17 @@
-.DS_Store
+# Secrets
 .env
 .env.*
-*.log
+!.env.example
 
-# audio/work artifacts
-imported/
-transcripts/
-*.wav
+# Local data — captured audio + DB are the user's, never committed
+library/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+*.log
