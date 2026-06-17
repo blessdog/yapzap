@@ -13,7 +13,7 @@ __pycache__/
 venv/
 
 # macOS app — generated project + build output (project.yml is the source)
-macapp/Recorder.xcodeproj/
+macapp/YapZapp.xcodeproj/
 macapp/build/
 macapp/DerivedData/
 

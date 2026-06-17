@@ -8,7 +8,7 @@ struct RecorderApp: App {
 
     var body: some Scene {
         // Window first so it's the primary scene and opens at launch.
-        Window("Recorder", id: "review") {
+        Window("YapZapp", id: "review") {
             ReviewView()
                 .environmentObject(state)
                 .environmentObject(audio)
@@ -16,7 +16,7 @@ struct RecorderApp: App {
         }
         .windowResizability(.contentMinSize)
 
-        MenuBarExtra("Recorder", systemImage: "waveform") {
+        MenuBarExtra("YapZapp", systemImage: "waveform") {
             MenuContent().environmentObject(state)
         }
     }
@@ -29,7 +29,7 @@ struct MenuContent: View {
     var body: some View {
         Text(state.status)
 
-        Button("Open Recorder") {
+        Button("Open YapZapp") {
             openWindow(id: "review")
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -42,7 +42,7 @@ struct MenuContent: View {
 
         Divider()
 
-        Button("Quit Recorder") {
+        Button("Quit YapZapp") {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")

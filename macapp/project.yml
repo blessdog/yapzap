@@ -1,6 +1,6 @@
-name: Recorder
+name: YapZapp
 options:
-  bundleIdPrefix: app.recorder
+  bundleIdPrefix: app.yapzapp
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
@@ -10,7 +10,7 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
-    PRODUCT_NAME: Recorder
+    PRODUCT_NAME: YapZapp
     GENERATE_INFOPLIST_FILE: YES
     # Regular app: Dock icon + a review window that opens at launch, PLUS a
     # menu-bar extra for quick access and background auto-ingest. (A menu-bar-
@@ -24,7 +24,7 @@ settings:
     ENABLE_APP_SANDBOX: NO
 
 targets:
-  Recorder:
+  YapZapp:
     type: application
     platform: macOS
     sources:

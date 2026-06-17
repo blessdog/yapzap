@@ -37,4 +37,21 @@ enum Engine {
     static var recorderIsMounted: Bool {
         FileManager.default.fileExists(atPath: Paths.recorderMount)
     }
+
+    /// What's freeable on the recorder right now (nil if python failed).
+    static func deviceStatus() -> DeviceStatus? {
+        let r = run(["device-status", "--json"])
+        guard r.ok, let line = r.output
+            .split(separator: "\n").last(where: { $0.contains("{") }),
+              let data = String(line).data(using: .utf8) else { return nil }
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        return try? dec.decode(DeviceStatus.self, from: data)
+    }
+
+    /// Delete verified-copied clips off the device. Python re-verifies each
+    /// clip's hash immediately before deleting — see recorder/device.py.
+    static func clearDevice() -> Result {
+        run(["clear-device"])
+    }
 }
