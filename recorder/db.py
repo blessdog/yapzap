@@ -54,7 +54,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")  # durability + concurrent reads
+    # Rollback journal (NOT WAL): the Swift app opens the DB read-only, and a
+    # read-only sqlite connection can't reliably open a WAL database (it can't
+    # create the -shm file). Single writer (python) + single reader (app) means
+    # WAL buys nothing here. DELETE mode keeps cross-process reads dependable.
+    conn.execute("PRAGMA journal_mode=DELETE;")
     conn.executescript(SCHEMA)
     _migrate(conn)
     return conn
