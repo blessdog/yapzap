@@ -22,13 +22,6 @@ enum FragmentStyle {
     }
 }
 
-/// What slice of time the sidebar is showing. "Archived" is folded in here so
-/// the one control answers "show me: this week / month / all / the archive."
-enum ScopeKind: String, CaseIterable, Identifiable {
-    case week = "Week", month = "Month", all = "All", archived = "Archived"
-    var id: String { rawValue }
-}
-
 /// One row in the timeline: either an extracted fragment, or a raw recording
 /// that produced no fragment (so nothing captured is ever invisible).
 enum TimelineItem: Identifiable, Hashable {
@@ -59,7 +52,7 @@ struct ReviewView: View {
     @EnvironmentObject var state: AppState
     @State private var search = ""
     @State private var typeFilter = "all"
-    @State private var scope: ScopeKind = .all
+    @State private var showArchived = false
     @State private var dayFilter: Date?          // set by the calendar popover
     @State private var selection: String?
     @State private var showCalendar = false
@@ -67,39 +60,29 @@ struct ReviewView: View {
     @State private var showFreeConfirm = false
 
     // MARK: filtering
+    //
+    // Stream-first: there is no time-scope control. The timeline always shows
+    // everything (newest first), grouped into soft buckets you scroll past, so
+    // you never land on an empty screen. Filters (type / archived / a specific
+    // day) are optional and, when active, shown as removable chips.
 
-    /// When the archive is selected (and we're not pinned to a specific day),
-    /// show archived; otherwise show the live timeline (active + done).
-    private var showingArchived: Bool { scope == .archived && dayFilter == nil }
-
-    private var visibleByState: [Fragment] {
-        state.fragments.filter { f in
-            showingArchived ? f.state == "archived"
-                            : (f.state == "active" || f.state == "done")
-        }
+    private var anyFilterActive: Bool {
+        typeFilter != "all" || dayFilter != nil || showArchived
     }
 
-    private func passesTime(_ date: Date?, _ cal: Calendar) -> Bool {
-        // Undated items (shouldn't happen with real data) only surface in the
-        // unfiltered "All" view, never under a week/month/day window.
-        guard let d = date else { return scope == .all && dayFilter == nil }
-        if let day = dayFilter { return cal.isDate(d, inSameDayAs: day) }
-        switch scope {
-        case .week:
-            let start = cal.dateInterval(of: .weekOfYear, for: Date())?.start
-            return start.map { d >= $0 } ?? true
-        case .month:
-            let start = cal.dateInterval(of: .month, for: Date())?.start
-            return start.map { d >= $0 } ?? true
-        case .all, .archived:
-            return true
-        }
+    private func passesDay(_ date: Date?, _ cal: Calendar) -> Bool {
+        guard let day = dayFilter else { return true }
+        guard let d = date else { return false }
+        return cal.isDate(d, inSameDayAs: day)
     }
 
     private var filteredFragments: [Fragment] {
         let cal = Calendar.current
-        return visibleByState.filter { f in
-            passesTime(f.capturedDate, cal)
+        return state.fragments.filter { f in
+            let stateOK = showArchived ? f.state == "archived"
+                                       : (f.state == "active" || f.state == "done")
+            return stateOK
+                && passesDay(f.capturedDate, cal)
                 && (typeFilter == "all" || f.type == typeFilter)
                 && matches(f)
         }
@@ -108,13 +91,13 @@ struct ReviewView: View {
     /// Recordings that yielded no (non-deleted) fragment. Shown only in the
     /// live timeline under the "All" type — they have no type of their own.
     private var unminedRecordings: [Recording] {
-        guard !showingArchived, typeFilter == "all" else { return [] }
+        guard !showArchived, typeFilter == "all" else { return [] }
         let mined = Set(state.fragments
             .filter { $0.state != "deleted" }.map { $0.yapId })
         let cal = Calendar.current
         return state.recordings.filter { r in
             !mined.contains(r.id)
-                && passesTime(r.capturedDate, cal)
+                && passesDay(r.capturedDate, cal)
                 && (search.isEmpty || r.transcript.localizedCaseInsensitiveContains(search))
         }
     }
@@ -132,24 +115,40 @@ struct ReviewView: View {
         return items.sorted { ($0.capturedAt) > ($1.capturedAt) }
     }
 
-    /// Timeline items bucketed by capture day, newest day first.
-    private var groups: [(day: Date, items: [TimelineItem])] {
+    /// A soft, relative bucket for a date: Today / Yesterday / This Week /
+    /// This Month / then by month ("May 2026"). `order` sorts buckets newest-
+    /// first; recent time is fine-grained, older collapses to months.
+    private func bucket(_ date: Date?) -> (order: Date, label: String) {
         let cal = Calendar.current
-        let dict = Dictionary(grouping: timeline) { item -> Date in
-            item.capturedDate.map { cal.startOfDay(for: $0) } ?? .distantPast
+        let now = Date()
+        guard let d = date else { return (.distantPast, "Undated") }
+        if cal.isDateInToday(d) { return (cal.startOfDay(for: now), "Today") }
+        if cal.isDateInYesterday(d) {
+            return (cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now))!,
+                    "Yesterday")
         }
-        return dict.map { (day: $0.key, items: $0.value) }.sorted { $0.day > $1.day }
+        if cal.isDate(d, equalTo: now, toGranularity: .weekOfYear) {
+            return (cal.dateInterval(of: .weekOfYear, for: now)?.start ?? d, "This Week")
+        }
+        if cal.isDate(d, equalTo: now, toGranularity: .month) {
+            return (cal.dateInterval(of: .month, for: now)?.start ?? d, "This Month")
+        }
+        let comps = cal.dateComponents([.year, .month], from: d)
+        let monthStart = cal.date(from: comps) ?? d
+        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"
+        return (monthStart, f.string(from: d))
     }
 
-    private func dayLabel(_ d: Date) -> String {
-        if d == .distantPast { return "Undated" }
-        let cal = Calendar.current
-        if cal.isDateInToday(d) { return "Today" }
-        if cal.isDateInYesterday(d) { return "Yesterday" }
-        let f = DateFormatter()
-        f.dateFormat = cal.isDate(d, equalTo: Date(), toGranularity: .year)
-            ? "EEEE, MMM d" : "EEEE, MMM d, yyyy"
-        return f.string(from: d)
+    /// Timeline items grouped into soft buckets, newest bucket first.
+    private var groups: [(label: String, items: [TimelineItem])] {
+        var order: [String: Date] = [:]
+        let dict = Dictionary(grouping: timeline) { item -> String in
+            let b = bucket(item.capturedDate)
+            order[b.label] = b.order
+            return b.label
+        }
+        return dict.map { (label: $0.key, items: $0.value) }
+            .sorted { (order[$0.label] ?? .distantPast) > (order[$1.label] ?? .distantPast) }
     }
 
     /// Resolve the selection against ALL items (not just the filtered set) so
@@ -177,51 +176,32 @@ struct ReviewView: View {
             case .fragment(let f): FragmentDetail(fragment: f)
             case .recording(let r): RecordingDetail(recording: r)
             case nil:
-                ContentUnavailableView("Pick a fragment", systemImage: "sparkles")
+                ContentUnavailableView("Pick a thought", systemImage: "sparkles")
             }
         }
     }
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // Fixed header: search + filters are pinned to the top and never
-            // move, whatever the result list below contains. (A plain TextField
-            // instead of .searchable — the latter reflows the header when the
-            // list is empty, which made the pills jump around.)
-            searchField
-                .padding(.horizontal, 8).padding(.top, 8)
-
+            // Stream-first header: just search + one filter control. Pinned to
+            // the top; nothing below it can make it move.
             HStack(spacing: 8) {
-                Picker("", selection: $scope) {
-                    ForEach(ScopeKind.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden()
-                // Scope and a pinned day are alternative lenses — choosing a
-                // scope drops the day pin so the buttons never feel "dead".
-                .onChange(of: scope) { _, _ in dayFilter = nil }
-
-                Button { showCalendar = true } label: {
-                    Image(systemName: "calendar")
-                }
-                .help("Jump to a day")
-                .popover(isPresented: $showCalendar, arrowEdge: .bottom) { calendarPopover }
+                searchField
+                filterMenu
             }
             .padding(.horizontal, 8).padding(.top, 8)
+            .padding(.bottom, anyFilterActive ? 4 : 8)
 
-            Picker("", selection: $typeFilter) {
-                Text("All").tag("all")
-                Text("Jokes").tag("joke")
-                Text("Ideas").tag("idea")
-                Text("Insights").tag("insight")
-                Text("Practical").tag("practical")
+            // Active filters appear as removable chips — only when set, so the
+            // default view stays clean and you can always see (and clear) why
+            // the stream is narrowed.
+            if anyFilterActive {
+                activeFilterChips
+                    .padding(.horizontal, 8).padding(.bottom, 8)
             }
-            .pickerStyle(.segmented).labelsHidden()
-            .padding(8)
-
-            if let day = dayFilter { dayChip(day) }
 
             // The content area fills everything below the fixed header, so the
-            // empty state centers in its own space instead of shoving the pills.
+            // empty state centers in its own space instead of shoving the header.
             listOrEmpty
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -271,8 +251,8 @@ struct ReviewView: View {
                                    description: Text(emptyHint))
         } else {
             List(selection: $selection) {
-                ForEach(groups, id: \.day) { group in
-                    Section(dayLabel(group.day)) {
+                ForEach(groups, id: \.label) { group in
+                    Section {
                         ForEach(group.items) { item in
                             switch item {
                             case .fragment(let f): fragmentRow(f)
@@ -280,10 +260,15 @@ struct ReviewView: View {
                                 RecordingRow(recording: r).tag(item.id)
                             }
                         }
+                    } header: {
+                        Text(group.label.uppercased())
+                            .font(.caption2).fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
             .listStyle(.inset)
+            .animation(.easeInOut(duration: 0.25), value: timeline.map(\.id))
         }
     }
 
@@ -331,23 +316,85 @@ struct ReviewView: View {
         }
     }
 
-    private func dayChip(_ day: Date) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "calendar")
-            Text(dayLabel(day))
-            Spacer()
-            Button { dayFilter = nil } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-            }.buttonStyle(.plain)
+    /// One small control holds every optional filter, so the default view is
+    /// just search + stream. The icon fills when any filter is active.
+    private var filterMenu: some View {
+        Menu {
+            Picker("Show", selection: $typeFilter) {
+                Label("Everything", systemImage: "tray.full").tag("all")
+                Label("Jokes", systemImage: "face.smiling").tag("joke")
+                Label("Ideas", systemImage: "lightbulb").tag("idea")
+                Label("Insights", systemImage: "sparkles").tag("insight")
+                Label("Practical", systemImage: "checklist").tag("practical")
+            }
+            Divider()
+            Toggle("Archived", isOn: $showArchived)
+            Divider()
+            Button { showCalendar = true } label: {
+                Label("Jump to a day…", systemImage: "calendar")
+            }
+            if dayFilter != nil {
+                Button { dayFilter = nil } label: { Label("Clear day", systemImage: "xmark") }
+            }
+        } label: {
+            Image(systemName: anyFilterActive
+                  ? "line.3.horizontal.decrease.circle.fill"
+                  : "line.3.horizontal.decrease.circle")
+                .imageScale(.large)
         }
-        .font(.caption)
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(.quaternary, in: Capsule())
-        .padding(.horizontal, 8).padding(.bottom, 6)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Filter")
+        .popover(isPresented: $showCalendar, arrowEdge: .bottom) { calendarPopover }
+    }
+
+    /// Removable chips for whatever filters are active — always visible so a
+    /// filter can never silently swallow the list (the old day-pin trap).
+    private var activeFilterChips: some View {
+        HStack(spacing: 6) {
+            if typeFilter != "all" {
+                filterChip(typeFilter.capitalized,
+                           icon: FragmentStyle.icon(typeFilter)) { typeFilter = "all" }
+            }
+            if let day = dayFilter {
+                filterChip(dayChipLabel(day), icon: "calendar") { dayFilter = nil }
+            }
+            if showArchived {
+                filterChip("Archived", icon: "archivebox") { showArchived = false }
+            }
+            Spacer()
+        }
+    }
+
+    private func filterChip(_ text: String, icon: String,
+                            clear: @escaping () -> Void) -> some View {
+        Button(action: clear) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                Text(text)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(.quaternary, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Clear this filter")
+    }
+
+    private func dayChipLabel(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return "Today" }
+        if cal.isDateInYesterday(d) { return "Yesterday" }
+        let f = DateFormatter()
+        f.dateFormat = cal.isDate(d, equalTo: Date(), toGranularity: .year)
+            ? "MMM d" : "MMM d, yyyy"
+        return f.string(from: d)
     }
 
     private var calendarPopover: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
+            Text("Jump to a day").font(.headline)
             DatePicker("", selection: $calendarDate, displayedComponents: .date)
                 .datePickerStyle(.graphical).labelsHidden()
                 .onChange(of: calendarDate) { _, newValue in
@@ -358,8 +405,8 @@ struct ReviewView: View {
                 Button("Clear day filter") { dayFilter = nil; showCalendar = false }
             }
         }
-        .padding()
-        .frame(width: 320)
+        .padding(20)
+        .frame(minWidth: 360, minHeight: 360)
     }
 
     private var devicePill: some View {
@@ -395,24 +442,19 @@ struct ReviewView: View {
         state.fragments.isEmpty && state.recordings.isEmpty
     }
     private var emptyTitle: String {
-        if showingArchived { return "Nothing archived" }
+        if showArchived { return "Nothing archived" }
         if libraryEmpty { return "Nothing captured yet" }
         if !search.isEmpty { return "No matches" }
         return "Nothing here"
     }
-    private var emptyIcon: String { showingArchived ? "archivebox" : "waveform" }
+    private var emptyIcon: String { showArchived ? "archivebox" : "waveform" }
     private var emptyHint: String {
-        if showingArchived { return "Fragments you archive will land here." }
+        if showArchived { return "Fragments you archive will land here." }
         if libraryEmpty { return "Plug in the recorder, or hit refresh." }
-        if !search.isEmpty { return "Try a different filter or search." }
+        if !search.isEmpty { return "Try a different search." }
         if dayFilter != nil { return "Nothing captured on this day." }
-        // A specific type with no matches in range often just needs "All".
-        if typeFilter != "all" { return "No \(typeFilter)s here — try All, or a wider range." }
-        switch scope {
-        case .week: return "Nothing captured this week — try Month or All."
-        case .month: return "Nothing captured this month — try All."
-        default: return "Try a different filter or search."
-        }
+        if typeFilter != "all" { return "No \(typeFilter)s yet — clear the filter to see everything." }
+        return "Plug in the recorder, or hit refresh."
     }
 }
 
@@ -425,6 +467,7 @@ struct FragmentRow: View {
                                    : FragmentStyle.icon(fragment.type))
                 .foregroundStyle(done ? Color.green : FragmentStyle.color(fragment.type))
                 .frame(width: 18)
+                .contentTransition(.symbolEffect(.replace))
             VStack(alignment: .leading, spacing: 2) {
                 Text(fragment.displayText)
                     .lineLimit(2)
@@ -435,6 +478,7 @@ struct FragmentRow: View {
             }
         }
         .padding(.vertical, 2)
+        .animation(.easeInOut(duration: 0.22), value: done)
     }
 }
 
