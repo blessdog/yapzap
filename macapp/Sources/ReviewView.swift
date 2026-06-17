@@ -51,7 +51,9 @@ enum TimelineItem: Identifiable, Hashable {
 struct ReviewView: View {
     @EnvironmentObject var state: AppState
     @State private var search = ""
-    @State private var typeFilter = "all"
+    // Toggle filters: empty = show everything. Tap a type to turn it on, tap
+    // again to turn it off; several can be on at once.
+    @State private var selectedTypes: Set<String> = []
     @State private var showArchived = false
     @State private var dayFilter: Date?          // set by the calendar popover
     @State private var selection: String?
@@ -67,7 +69,7 @@ struct ReviewView: View {
     // day) are optional and, when active, shown as removable chips.
 
     private var anyFilterActive: Bool {
-        typeFilter != "all" || dayFilter != nil || showArchived
+        !selectedTypes.isEmpty || dayFilter != nil || showArchived
     }
 
     private func passesDay(_ date: Date?, _ cal: Calendar) -> Bool {
@@ -83,15 +85,15 @@ struct ReviewView: View {
                                        : (f.state == "active" || f.state == "done")
             return stateOK
                 && passesDay(f.capturedDate, cal)
-                && (typeFilter == "all" || f.type == typeFilter)
+                && (selectedTypes.isEmpty || selectedTypes.contains(f.type))
                 && matches(f)
         }
     }
 
-    /// Recordings that yielded no (non-deleted) fragment. Shown only in the
-    /// live timeline under the "All" type — they have no type of their own.
+    /// Recordings that yielded no (non-deleted) fragment. Shown only when no
+    /// type filter is on — they have no type of their own.
     private var unminedRecordings: [Recording] {
-        guard !showArchived, typeFilter == "all" else { return [] }
+        guard !showArchived, selectedTypes.isEmpty else { return [] }
         let mined = Set(state.fragments
             .filter { $0.state != "deleted" }.map { $0.yapId })
         let cal = Calendar.current
@@ -183,29 +185,33 @@ struct ReviewView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // Stream-first header: just search + one filter control. Pinned to
-            // the top; nothing below it can make it move.
-            HStack(spacing: 8) {
-                searchField
-                filterMenu
+            // Fixed header (pinned; nothing below it can make it move):
+            //  row 1 — search + jump-to-day + archived toggle
+            //  row 2 — type toggle pills (tap on/off; none on = everything)
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    searchField
+                    calendarButton
+                    archivedButton
+                }
+                HStack(spacing: 6) {
+                    ForEach(Self.typeOrder, id: \.0) { type, label in
+                        typePill(type, label)
+                    }
+                    Spacer(minLength: 0)
+                    if let day = dayFilter { dayChip(day) }
+                }
             }
-            .padding(.horizontal, 8).padding(.top, 8)
-            .padding(.bottom, anyFilterActive ? 4 : 8)
+            .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 8)
 
-            // Active filters appear as removable chips — only when set, so the
-            // default view stays clean and you can always see (and clear) why
-            // the stream is narrowed.
-            if anyFilterActive {
-                activeFilterChips
-                    .padding(.horizontal, 8).padding(.bottom, 8)
-            }
+            Divider()
 
-            // The content area fills everything below the fixed header, so the
-            // empty state centers in its own space instead of shoving the header.
+            // Content fills everything below the fixed header, so an empty
+            // result centers in its own space instead of shoving the header.
             listOrEmpty
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 340)
+        .frame(minWidth: 360)
         .navigationTitle("YapZapp")
         .toolbar {
             ToolbarItem {
@@ -316,62 +322,62 @@ struct ReviewView: View {
         }
     }
 
-    /// One small control holds every optional filter, so the default view is
-    /// just search + stream. The icon fills when any filter is active.
-    private var filterMenu: some View {
-        Menu {
-            Picker("Show", selection: $typeFilter) {
-                Label("Everything", systemImage: "tray.full").tag("all")
-                Label("Jokes", systemImage: "face.smiling").tag("joke")
-                Label("Ideas", systemImage: "lightbulb").tag("idea")
-                Label("Insights", systemImage: "sparkles").tag("insight")
-                Label("Practical", systemImage: "checklist").tag("practical")
-            }
-            Divider()
-            Toggle("Archived", isOn: $showArchived)
-            Divider()
-            Button { showCalendar = true } label: {
-                Label("Jump to a day…", systemImage: "calendar")
-            }
-            if dayFilter != nil {
-                Button { dayFilter = nil } label: { Label("Clear day", systemImage: "xmark") }
-            }
+    // The five filters, laid out flat — no menus. Tap to toggle.
+    static let typeOrder: [(String, String)] = [
+        ("joke", "Jokes"), ("idea", "Ideas"),
+        ("insight", "Insights"), ("practical", "Practical"),
+    ]
+
+    /// A type toggle. On = filled with the type's accent color; tap to flip.
+    private func typePill(_ type: String, _ label: String) -> some View {
+        let on = selectedTypes.contains(type)
+        let color = FragmentStyle.color(type)
+        return Button {
+            if on { selectedTypes.remove(type) } else { selectedTypes.insert(type) }
         } label: {
-            Image(systemName: anyFilterActive
-                  ? "line.3.horizontal.decrease.circle.fill"
-                  : "line.3.horizontal.decrease.circle")
+            HStack(spacing: 4) {
+                Image(systemName: FragmentStyle.icon(type)).imageScale(.small)
+                Text(label)
+            }
+            .font(.caption).fontWeight(on ? .semibold : .regular)
+            .foregroundStyle(on ? .white : .primary)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(on ? color : Color(.quaternaryLabelColor).opacity(0.5),
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Hide \(label.lowercased())" : "Show only \(label.lowercased())")
+        .animation(.easeInOut(duration: 0.18), value: on)
+    }
+
+    /// Jump-to-a-day button (opens the calendar popover).
+    private var calendarButton: some View {
+        Button { showCalendar = true } label: {
+            Image(systemName: dayFilter != nil ? "calendar.circle.fill" : "calendar")
                 .imageScale(.large)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Filter")
+        .buttonStyle(.plain)
+        .help("Jump to a day")
         .popover(isPresented: $showCalendar, arrowEdge: .bottom) { calendarPopover }
     }
 
-    /// Removable chips for whatever filters are active — always visible so a
-    /// filter can never silently swallow the list (the old day-pin trap).
-    private var activeFilterChips: some View {
-        HStack(spacing: 6) {
-            if typeFilter != "all" {
-                filterChip(typeFilter.capitalized,
-                           icon: FragmentStyle.icon(typeFilter)) { typeFilter = "all" }
-            }
-            if let day = dayFilter {
-                filterChip(dayChipLabel(day), icon: "calendar") { dayFilter = nil }
-            }
-            if showArchived {
-                filterChip("Archived", icon: "archivebox") { showArchived = false }
-            }
-            Spacer()
+    /// Archived toggle (shows archived instead of the live stream).
+    private var archivedButton: some View {
+        Button { showArchived.toggle() } label: {
+            Image(systemName: showArchived ? "archivebox.fill" : "archivebox")
+                .imageScale(.large)
+                .foregroundStyle(showArchived ? Color.accentColor : .primary)
         }
+        .buttonStyle(.plain)
+        .help(showArchived ? "Back to your stream" : "Show archived")
     }
 
-    private func filterChip(_ text: String, icon: String,
-                            clear: @escaping () -> Void) -> some View {
-        Button(action: clear) {
+    /// Small chip showing the pinned day, with a clear button.
+    private func dayChip(_ day: Date) -> some View {
+        Button { dayFilter = nil } label: {
             HStack(spacing: 4) {
-                Image(systemName: icon)
-                Text(text)
+                Image(systemName: "calendar")
+                Text(dayChipLabel(day))
                 Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
             }
             .font(.caption)
@@ -379,7 +385,7 @@ struct ReviewView: View {
             .background(.quaternary, in: Capsule())
         }
         .buttonStyle(.plain)
-        .help("Clear this filter")
+        .help("Clear day filter")
     }
 
     private func dayChipLabel(_ d: Date) -> String {
@@ -453,7 +459,7 @@ struct ReviewView: View {
         if libraryEmpty { return "Plug in the recorder, or hit refresh." }
         if !search.isEmpty { return "Try a different search." }
         if dayFilter != nil { return "Nothing captured on this day." }
-        if typeFilter != "all" { return "No \(typeFilter)s yet — clear the filter to see everything." }
+        if !selectedTypes.isEmpty { return "None of those types here — tap the lit pills to clear them." }
         return "Plug in the recorder, or hit refresh."
     }
 }
