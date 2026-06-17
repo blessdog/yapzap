@@ -59,7 +59,7 @@ struct ReviewView: View {
     @EnvironmentObject var state: AppState
     @State private var search = ""
     @State private var typeFilter = "all"
-    @State private var scope: ScopeKind = .week
+    @State private var scope: ScopeKind = .all
     @State private var dayFilter: Date?          // set by the calendar popover
     @State private var selection: String?
     @State private var showCalendar = false
@@ -189,6 +189,9 @@ struct ReviewView: View {
                     ForEach(ScopeKind.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
+                // Scope and a pinned day are alternative lenses — choosing a
+                // scope drops the day pin so the buttons never feel "dead".
+                .onChange(of: scope) { _, _ in dayFilter = nil }
 
                 Button { showCalendar = true } label: {
                     Image(systemName: "calendar")
