@@ -8,6 +8,7 @@ for the next run to retry. Nothing is ever silently lost.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,6 +20,15 @@ from .transcribe import transcribe_wav
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def sha256_of(path: Path) -> str:
+    """Stream the file through SHA-256 (clips are small, but don't slurp)."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 @dataclass
@@ -75,8 +85,20 @@ def import_new(source: Path, conn, report: IngestReport) -> None:
             imported_at=_utc_now(),
             raw_audio_path=str(dest),
             size_bytes=dest.stat().st_size,
+            sha256=sha256_of(dest),  # hash the copy — the gate for wiping the device
         )
         report.imported += 1
+
+
+def backfill_sha256(conn) -> int:
+    """Hash library copies of rows imported before hashing existed. Idempotent."""
+    filled = 0
+    for row in db.yaps_missing_sha256(conn):
+        path = Path(row["raw_audio_path"])
+        if path.exists():
+            db.set_sha256(conn, row["id"], sha256_of(path))
+            filled += 1
+    return filled
 
 
 def transcribe_pending(conn, report: IngestReport, limit: int | None = None) -> None:
@@ -120,6 +142,7 @@ def run(source: Path, *, transcribe: bool = True, limit: int | None = None) -> I
     report = IngestReport()
     conn = db.connect(config.DB_PATH)
     try:
+        backfill_sha256(conn)  # make pre-hash rows wipe-eligible
         if source.exists():
             import_new(source, conn, report)
         else:

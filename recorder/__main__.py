@@ -2,14 +2,19 @@
 
 Commands:
   ingest [--source DIR] [--no-transcribe] [--limit N]
+  organize [--limit N]
   stats
   list [--limit N]
+  fragments [--type T] [--limit N]
   show <id>
+  device-status [--source DIR] [--json]
+  clear-device [--source DIR] [--dry-run] [--json]
 """
 
 from __future__ import annotations
 
 import argparse
+import json as _json
 import sys
 import textwrap
 from pathlib import Path
@@ -113,6 +118,56 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_device_status(args: argparse.Namespace) -> int:
+    from . import device
+
+    source = Path(args.source).expanduser() if args.source else config.DEFAULT_SOURCE
+    conn = db.connect(config.DB_PATH)
+    try:
+        st = device.status(conn, source)
+    finally:
+        conn.close()
+    if args.json:
+        print(_json.dumps(st))
+        return 0
+    if not st["connected"]:
+        print(f"Recorder not connected (no {source}).")
+        return 0
+    mb = st["freeable_bytes"] / (1024 * 1024)
+    print(f"Recorder at {source}")
+    print(f"  clips on device:  {st['total']}")
+    print(f"  ready to free:    {st['clearable']}  ({mb:.0f} MB incl. junk)")
+    print(f"  blocked (kept):   {st['blocked']}")
+    print(f"  junk (._*):       {st['junk']}")
+    return 0
+
+
+def cmd_clear_device(args: argparse.Namespace) -> int:
+    from . import device
+
+    source = Path(args.source).expanduser() if args.source else config.DEFAULT_SOURCE
+    if not source.exists():
+        print(f"Recorder not connected (no {source}).")
+        return 1
+    conn = db.connect(config.DB_PATH)
+    try:
+        report = device.clear_device(conn, source, dry_run=args.dry_run)
+    finally:
+        conn.close()
+    if args.json:
+        print(_json.dumps({
+            "deleted": report.deleted,
+            "junk_deleted": report.junk_deleted,
+            "bytes_freed": report.bytes_freed,
+            "skipped": [{"name": n, "why": w} for n, w in report.skipped],
+            "dry_run": report.dry_run,
+        }))
+        return 0
+    print("Dry run — nothing deleted:" if args.dry_run else "Done:")
+    print(report.summary())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="recorder", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -141,6 +196,17 @@ def main(argv: list[str] | None = None) -> int:
     p_show = sub.add_parser("show", help="full transcript for one yap")
     p_show.add_argument("id", type=int)
     p_show.set_defaults(func=cmd_show)
+
+    p_ds = sub.add_parser("device-status", help="what's freeable on the recorder")
+    p_ds.add_argument("--source", help=f"device dir (default {config.DEFAULT_SOURCE})")
+    p_ds.add_argument("--json", action="store_true", help="machine-readable output")
+    p_ds.set_defaults(func=cmd_device_status)
+
+    p_cd = sub.add_parser("clear-device", help="delete verified-copied clips off the recorder")
+    p_cd.add_argument("--source", help=f"device dir (default {config.DEFAULT_SOURCE})")
+    p_cd.add_argument("--dry-run", action="store_true", help="show what would be freed")
+    p_cd.add_argument("--json", action="store_true", help="machine-readable output")
+    p_cd.set_defaults(func=cmd_clear_device)
 
     args = parser.parse_args(argv)
     return args.func(args)
