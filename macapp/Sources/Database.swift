@@ -103,6 +103,31 @@ enum Database {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
+    /// Every recording (yap), newest first — used to surface un-mined clips.
+    static func recordings() -> [Recording] {
+        guard let db = open() else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT id, captured_at, COALESCE(transcript, ''),
+                   COALESCE(duration_sec, 0), status
+              FROM yaps ORDER BY captured_at DESC
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [Recording] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out.append(Recording(
+                id: Int(sqlite3_column_int64(stmt, 0)),
+                capturedAt: text(stmt, 1),
+                transcript: text(stmt, 2),
+                durationSec: sqlite3_column_double(stmt, 3),
+                status: text(stmt, 4)
+            ))
+        }
+        return out
+    }
+
     static func yap(_ id: Int) -> YapDetail? {
         guard let db = open() else { return nil }
         defer { sqlite3_close(db) }

@@ -29,13 +29,39 @@ enum ScopeKind: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// One row in the timeline: either an extracted fragment, or a raw recording
+/// that produced no fragment (so nothing captured is ever invisible).
+enum TimelineItem: Identifiable, Hashable {
+    case fragment(Fragment)
+    case recording(Recording)
+
+    var id: String {
+        switch self {
+        case .fragment(let f): return "f\(f.id)"
+        case .recording(let r): return "r\(r.id)"
+        }
+    }
+    var capturedDate: Date? {
+        switch self {
+        case .fragment(let f): return f.capturedDate
+        case .recording(let r): return r.capturedDate
+        }
+    }
+    var capturedAt: String {
+        switch self {
+        case .fragment(let f): return f.capturedAt
+        case .recording(let r): return r.capturedAt
+        }
+    }
+}
+
 struct ReviewView: View {
     @EnvironmentObject var state: AppState
     @State private var search = ""
     @State private var typeFilter = "all"
     @State private var scope: ScopeKind = .week
     @State private var dayFilter: Date?          // set by the calendar popover
-    @State private var selection: Fragment.ID?
+    @State private var selection: String?
     @State private var showCalendar = false
     @State private var calendarDate = Date()
     @State private var showFreeConfirm = false
@@ -53,10 +79,10 @@ struct ReviewView: View {
         }
     }
 
-    private func passesTime(_ f: Fragment, _ cal: Calendar) -> Bool {
-        // Undated fragments (shouldn't happen with real data) only surface in
-        // the unfiltered "All" view, never under a week/month/day window.
-        guard let d = f.capturedDate else { return scope == .all && dayFilter == nil }
+    private func passesTime(_ date: Date?, _ cal: Calendar) -> Bool {
+        // Undated items (shouldn't happen with real data) only surface in the
+        // unfiltered "All" view, never under a week/month/day window.
+        guard let d = date else { return scope == .all && dayFilter == nil }
         if let day = dayFilter { return cal.isDate(d, inSameDayAs: day) }
         switch scope {
         case .week:
@@ -70,12 +96,26 @@ struct ReviewView: View {
         }
     }
 
-    private var filtered: [Fragment] {
+    private var filteredFragments: [Fragment] {
         let cal = Calendar.current
         return visibleByState.filter { f in
-            passesTime(f, cal)
+            passesTime(f.capturedDate, cal)
                 && (typeFilter == "all" || f.type == typeFilter)
                 && matches(f)
+        }
+    }
+
+    /// Recordings that yielded no (non-deleted) fragment. Shown only in the
+    /// live timeline under the "All" type — they have no type of their own.
+    private var unminedRecordings: [Recording] {
+        guard !showingArchived, typeFilter == "all" else { return [] }
+        let mined = Set(state.fragments
+            .filter { $0.state != "deleted" }.map { $0.yapId })
+        let cal = Calendar.current
+        return state.recordings.filter { r in
+            !mined.contains(r.id)
+                && passesTime(r.capturedDate, cal)
+                && (search.isEmpty || r.transcript.localizedCaseInsensitiveContains(search))
         }
     }
 
@@ -86,12 +126,17 @@ struct ReviewView: View {
             || f.tags.contains { $0.localizedCaseInsensitiveContains(search) }
     }
 
-    /// Fragments bucketed by capture day, newest day first. `filtered` is
-    /// already newest-first, so each bucket stays newest-first too.
-    private var groups: [(day: Date, items: [Fragment])] {
+    private var timeline: [TimelineItem] {
+        let items = filteredFragments.map { TimelineItem.fragment($0) }
+                  + unminedRecordings.map { TimelineItem.recording($0) }
+        return items.sorted { ($0.capturedAt) > ($1.capturedAt) }
+    }
+
+    /// Timeline items bucketed by capture day, newest day first.
+    private var groups: [(day: Date, items: [TimelineItem])] {
         let cal = Calendar.current
-        let dict = Dictionary(grouping: filtered) { f -> Date in
-            f.capturedDate.map { cal.startOfDay(for: $0) } ?? .distantPast
+        let dict = Dictionary(grouping: timeline) { item -> Date in
+            item.capturedDate.map { cal.startOfDay(for: $0) } ?? .distantPast
         }
         return dict.map { (day: $0.key, items: $0.value) }.sorted { $0.day > $1.day }
     }
@@ -107,7 +152,20 @@ struct ReviewView: View {
         return f.string(from: d)
     }
 
-    private var selected: Fragment? { state.fragments.first { $0.id == selection } }
+    /// Resolve the selection against ALL items (not just the filtered set) so
+    /// the detail pane keeps showing an item right after you act on it.
+    private var selectedItem: TimelineItem? {
+        guard let sel = selection else { return nil }
+        if sel.hasPrefix("f"), let id = Int(sel.dropFirst()),
+           let f = state.fragments.first(where: { $0.id == id }) {
+            return .fragment(f)
+        }
+        if sel.hasPrefix("r"), let id = Int(sel.dropFirst()),
+           let r = state.recordings.first(where: { $0.id == id }) {
+            return .recording(r)
+        }
+        return nil
+    }
 
     // MARK: body
 
@@ -115,9 +173,10 @@ struct ReviewView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            if let f = selected {
-                FragmentDetail(fragment: f)
-            } else {
+            switch selectedItem {
+            case .fragment(let f): FragmentDetail(fragment: f)
+            case .recording(let r): RecordingDetail(recording: r)
+            case nil:
                 ContentUnavailableView("Pick a fragment", systemImage: "sparkles")
             }
         }
@@ -180,43 +239,52 @@ struct ReviewView: View {
 
     @ViewBuilder
     private var listOrEmpty: some View {
-        if filtered.isEmpty {
+        if timeline.isEmpty {
             ContentUnavailableView(emptyTitle, systemImage: emptyIcon,
                                    description: Text(emptyHint))
         } else {
             List(selection: $selection) {
                 ForEach(groups, id: \.day) { group in
                     Section(dayLabel(group.day)) {
-                        ForEach(group.items) { f in
-                            FragmentRow(fragment: f).tag(f.id)
-                                .contextMenu { rowActions(f) }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) { state.delete(f.id) } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                    if f.state == "archived" {
-                                        Button { state.unarchive(f.id) } label: {
-                                            Label("Unarchive", systemImage: "tray.and.arrow.up")
-                                        }
-                                    } else {
-                                        Button { state.archive(f.id) } label: {
-                                            Label("Archive", systemImage: "archivebox")
-                                        }.tint(.indigo)
-                                    }
-                                }
-                                .swipeActions(edge: .leading) {
-                                    Button { state.toggleDone(f.id) } label: {
-                                        Label(f.state == "done" ? "Undo" : "Done",
-                                              systemImage: f.state == "done"
-                                                ? "arrow.uturn.left" : "checkmark")
-                                    }.tint(.green)
-                                }
+                        ForEach(group.items) { item in
+                            switch item {
+                            case .fragment(let f): fragmentRow(f)
+                            case .recording(let r):
+                                RecordingRow(recording: r).tag(item.id)
+                            }
                         }
                     }
                 }
             }
             .listStyle(.inset)
         }
+    }
+
+    @ViewBuilder
+    private func fragmentRow(_ f: Fragment) -> some View {
+        FragmentRow(fragment: f).tag("f\(f.id)")
+            .contextMenu { rowActions(f) }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { state.delete(f.id) } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                if f.state == "archived" {
+                    Button { state.unarchive(f.id) } label: {
+                        Label("Unarchive", systemImage: "tray.and.arrow.up")
+                    }
+                } else {
+                    Button { state.archive(f.id) } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }.tint(.indigo)
+                }
+            }
+            .swipeActions(edge: .leading) {
+                Button { state.toggleDone(f.id) } label: {
+                    Label(f.state == "done" ? "Undo" : "Done",
+                          systemImage: f.state == "done"
+                            ? "arrow.uturn.left" : "checkmark")
+                }.tint(.green)
+            }
     }
 
     @ViewBuilder
@@ -296,18 +364,23 @@ struct ReviewView: View {
 
     // MARK: empty-state copy
 
+    private var libraryEmpty: Bool {
+        state.fragments.isEmpty && state.recordings.isEmpty
+    }
     private var emptyTitle: String {
         if showingArchived { return "Nothing archived" }
-        if state.fragments.isEmpty { return "Nothing captured yet" }
+        if libraryEmpty { return "Nothing captured yet" }
         if !search.isEmpty { return "No matches" }
         return "Nothing here"
     }
     private var emptyIcon: String { showingArchived ? "archivebox" : "waveform" }
     private var emptyHint: String {
         if showingArchived { return "Fragments you archive will land here." }
-        if state.fragments.isEmpty { return "Plug in the recorder, or hit refresh." }
+        if libraryEmpty { return "Plug in the recorder, or hit refresh." }
         if !search.isEmpty { return "Try a different filter or search." }
         if dayFilter != nil { return "Nothing captured on this day." }
+        // A specific type with no matches in range often just needs "All".
+        if typeFilter != "all" { return "No \(typeFilter)s here — try All, or a wider range." }
         switch scope {
         case .week: return "Nothing captured this week — try Month or All."
         case .month: return "Nothing captured this month — try All."
@@ -474,5 +547,84 @@ struct FragmentDetail: View {
             yap = Database.yap(fragment.yapId)
             editing = false
         }
+    }
+}
+
+/// A raw recording that produced no fragment — shown so nothing is invisible.
+struct RecordingRow: View {
+    let recording: Recording
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: recording.isNoSpeech ? "mic.slash" : "waveform")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recording.snippet)
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+                    .italic(recording.isNoSpeech)
+                HStack(spacing: 6) {
+                    Text(recording.capturedAt.prettyTimestamp)
+                    Text("· recording")
+                }
+                .font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct RecordingDetail: View {
+    let recording: Recording
+    @EnvironmentObject var audio: AudioPlayer
+    @State private var yap: YapDetail?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Label("Recording", systemImage: "waveform")
+                        .font(.headline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(recording.capturedAt.prettyTimestamp)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+
+                Text(recording.isNoSpeech
+                     ? "No speech was detected in this clip."
+                     : "No idea was extracted from this one yet — here's the raw capture, kept so nothing you said goes missing.")
+                    .font(.callout).foregroundStyle(.secondary)
+
+                if let yap {
+                    HStack {
+                        Button { audio.toggle(yap: yap) } label: {
+                            Label(audio.playingYapId == yap.id ? "Stop" : "Play recording",
+                                  systemImage: audio.playingYapId == yap.id
+                                    ? "stop.circle" : "play.circle")
+                        }
+                        Spacer()
+                        Text(String(format: "%.0fs", yap.durationSec))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                if !recording.isNoSpeech {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Transcript — your exact words")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(recording.transcript)
+                            .font(.title3)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { yap = Database.yap(recording.id) }
+        .onChange(of: recording.id) { _, _ in yap = Database.yap(recording.id) }
     }
 }

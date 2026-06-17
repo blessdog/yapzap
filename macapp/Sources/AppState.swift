@@ -6,6 +6,7 @@ import AppKit
 @MainActor
 final class AppState: ObservableObject {
     @Published var fragments: [Fragment] = []
+    @Published var recordings: [Recording] = []
     @Published var status: String = ""
     @Published var isBusy = false
     @Published var deviceConnected = false
@@ -44,6 +45,7 @@ final class AppState: ObservableObject {
 
     func refresh() {
         fragments = Database.fragments()
+        recordings = Database.recordings()
         if !isBusy { updateStatus() }
     }
 

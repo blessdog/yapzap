@@ -28,6 +28,23 @@ struct Fragment: Identifiable, Hashable {
     var capturedDate: Date? { capturedAt.parsedTimestamp }
 }
 
+/// A raw recording (one yap). Surfaced in the timeline when it produced no
+/// fragment, so nothing captured is ever invisible (reliability principle #1).
+struct Recording: Identifiable, Hashable {
+    let id: Int
+    let capturedAt: String
+    let transcript: String
+    let durationSec: Double
+    let status: String   // transcribed | empty | imported | error
+
+    var capturedDate: Date? { capturedAt.parsedTimestamp }
+    var isNoSpeech: Bool {
+        status == "empty"
+            || transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    var snippet: String { isNoSpeech ? "(no speech captured)" : transcript }
+}
+
 /// Snapshot of what's freeable on the recorder (decoded from `device-status
 /// --json`). snake_case keys are mapped via the decoder in Engine.
 struct DeviceStatus: Decodable, Equatable {
