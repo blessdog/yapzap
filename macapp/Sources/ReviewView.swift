@@ -184,6 +184,13 @@ struct ReviewView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            // Fixed header: search + filters are pinned to the top and never
+            // move, whatever the result list below contains. (A plain TextField
+            // instead of .searchable — the latter reflows the header when the
+            // list is empty, which made the pills jump around.)
+            searchField
+                .padding(.horizontal, 8).padding(.top, 8)
+
             HStack(spacing: 8) {
                 Picker("", selection: $scope) {
                     ForEach(ScopeKind.allCases) { Text($0.rawValue).tag($0) }
@@ -213,10 +220,12 @@ struct ReviewView: View {
 
             if let day = dayFilter { dayChip(day) }
 
+            // The content area fills everything below the fixed header, so the
+            // empty state centers in its own space instead of shoving the pills.
             listOrEmpty
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 340)
-        .searchable(text: $search, placement: .sidebar, prompt: "Search your mind")
         .navigationTitle("YapZapp")
         .toolbar {
             ToolbarItem {
@@ -238,6 +247,21 @@ struct ReviewView: View {
                + "recorder. Every one is already copied and verified in your "
                + "library — your captures stay safe.")
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search your mind", text: $search)
+                .textFieldStyle(.plain)
+            if !search.isEmpty {
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
