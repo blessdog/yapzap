@@ -12,8 +12,9 @@ settings:
     SWIFT_VERSION: "5.0"
     PRODUCT_NAME: Recorder
     GENERATE_INFOPLIST_FILE: YES
-    # Menu-bar accessory app: no Dock icon, lives in the status bar.
-    INFOPLIST_KEY_LSUIElement: YES
+    # Regular app: Dock icon + a review window that opens at launch, PLUS a
+    # menu-bar extra for quick access and background auto-ingest. (A menu-bar-
+    # only app left nothing visible on screen, which read as "no data".)
     # Local personal build: ad-hoc sign, no sandbox (it shells out to python
     # and reads /Volumes/Recorder + the project dir).
     CODE_SIGN_IDENTITY: "-"

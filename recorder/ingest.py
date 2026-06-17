@@ -55,6 +55,10 @@ def import_new(source: Path, conn, report: IngestReport) -> None:
     wavs = sorted(source.rglob("*.wav"))
     for src in wavs:
         filename = src.name
+        # Skip macOS AppleDouble/hidden junk (e.g. ._foo.wav) that appears on
+        # the recorder's FAT volume — these aren't real audio.
+        if filename.startswith("."):
+            continue
         if db.get_by_filename(conn, filename) is not None:
             report.skipped += 1
             continue

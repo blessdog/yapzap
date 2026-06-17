@@ -11,6 +11,11 @@ final class AppState: ObservableObject {
 
     init() {
         refresh()
+        // Pull anything new if the recorder is already plugged in at launch
+        // (the mount notification only fires for a *new* mount).
+        if Engine.recorderIsMounted {
+            ingestNow(auto: true)
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didMountNotification, object: nil, queue: .main
         ) { [weak self] _ in

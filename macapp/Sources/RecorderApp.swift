@@ -7,10 +7,7 @@ struct RecorderApp: App {
     @StateObject private var audio = AudioPlayer()
 
     var body: some Scene {
-        MenuBarExtra("Recorder", systemImage: "waveform") {
-            MenuContent().environmentObject(state)
-        }
-
+        // Window first so it's the primary scene and opens at launch.
         Window("Recorder", id: "review") {
             ReviewView()
                 .environmentObject(state)
@@ -18,6 +15,10 @@ struct RecorderApp: App {
                 .frame(minWidth: 760, minHeight: 500)
         }
         .windowResizability(.contentMinSize)
+
+        MenuBarExtra("Recorder", systemImage: "waveform") {
+            MenuContent().environmentObject(state)
+        }
     }
 }
 
