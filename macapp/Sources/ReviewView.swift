@@ -57,8 +57,8 @@ struct ReviewView: View {
     @State private var showArchived = false
     @State private var dayFilter: Date?          // set by the calendar popover
     @State private var selection: String?
-    @State private var showCalendar = false
-    @State private var calendarDate = Date()
+    @State private var calendarMode = false        // full month-grid view
+    @State private var displayedMonth = Date()      // any date within shown month
     @State private var showFreeConfirm = false
     // Rediscover: which day's card the user has dismissed (-1 = none).
     @AppStorage("rediscoverDismissedDay") private var rediscoverDismissedDay = -1
@@ -200,16 +200,41 @@ struct ReviewView: View {
     // MARK: body
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            switch selectedItem {
-            case .fragment(let f): FragmentDetail(fragment: f)
-            case .recording(let r): RecordingDetail(recording: r)
-            case nil:
-                ContentUnavailableView("Pick a thought", systemImage: "sparkles")
+        if calendarMode {
+            CalendarMonthView(
+                captures: allCaptures,
+                month: $displayedMonth,
+                onPickDay: { day in
+                    dayFilter = day
+                    selectedTypes = []
+                    showArchived = false
+                    search = ""
+                    calendarMode = false
+                },
+                onClose: { calendarMode = false }
+            )
+        } else {
+            NavigationSplitView {
+                sidebar
+            } detail: {
+                switch selectedItem {
+                case .fragment(let f): FragmentDetail(fragment: f)
+                case .recording(let r): RecordingDetail(recording: r)
+                case nil:
+                    ContentUnavailableView("Pick a thought", systemImage: "sparkles")
+                }
             }
         }
+    }
+
+    /// Everything live (fragments you haven't archived/deleted + every
+    /// recording), as timeline items — the data the calendar plots by day.
+    private var allCaptures: [TimelineItem] {
+        let frags = state.fragments
+            .filter { $0.state == "active" || $0.state == "done" }
+            .map { TimelineItem.fragment($0) }
+        let recs = state.recordings.map { TimelineItem.recording($0) }
+        return frags + recs
     }
 
     private var sidebar: some View {
@@ -393,15 +418,13 @@ struct ReviewView: View {
         .animation(.easeInOut(duration: 0.18), value: on)
     }
 
-    /// Jump-to-a-day button (opens the calendar popover).
+    /// Switch to the full month-grid calendar view.
     private var calendarButton: some View {
-        Button { showCalendar = true } label: {
-            Image(systemName: dayFilter != nil ? "calendar.circle.fill" : "calendar")
-                .imageScale(.large)
+        Button { calendarMode = true } label: {
+            Image(systemName: "calendar").imageScale(.large)
         }
         .buttonStyle(.plain)
-        .help("Jump to a day")
-        .popover(isPresented: $showCalendar, arrowEdge: .bottom) { calendarPopover }
+        .help("Calendar view")
     }
 
     /// Archived toggle (shows archived instead of the live stream).
@@ -439,23 +462,6 @@ struct ReviewView: View {
         f.dateFormat = cal.isDate(d, equalTo: Date(), toGranularity: .year)
             ? "MMM d" : "MMM d, yyyy"
         return f.string(from: d)
-    }
-
-    private var calendarPopover: some View {
-        VStack(spacing: 12) {
-            Text("Jump to a day").font(.headline)
-            DatePicker("", selection: $calendarDate, displayedComponents: .date)
-                .datePickerStyle(.graphical).labelsHidden()
-                .onChange(of: calendarDate) { _, newValue in
-                    dayFilter = newValue
-                    showCalendar = false
-                }
-            if dayFilter != nil {
-                Button("Clear day filter") { dayFilter = nil; showCalendar = false }
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 360, minHeight: 360)
     }
 
     @ViewBuilder
@@ -833,5 +839,157 @@ struct RecordingDetail: View {
         }
         .onAppear { yap = Database.yap(recording.id) }
         .onChange(of: recording.id) { _, _ in yap = Database.yap(recording.id) }
+    }
+}
+
+/// A full-window Apple-Calendar-style month grid. Each day cell shows that
+/// day's captures as event-style chips; tapping a day drills into it (the
+/// stream, pinned to that day).
+struct CalendarMonthView: View {
+    let captures: [TimelineItem]
+    @Binding var month: Date
+    let onPickDay: (Date) -> Void
+    let onClose: () -> Void
+
+    private var cal: Calendar { Calendar.current }
+
+    private var monthStart: Date {
+        cal.date(from: cal.dateComponents([.year, .month], from: month)) ?? month
+    }
+    private var gridDays: [Date] {
+        let weekday = cal.component(.weekday, from: monthStart)
+        let leading = (weekday - cal.firstWeekday + 7) % 7
+        let start = cal.date(byAdding: .day, value: -leading, to: monthStart) ?? monthStart
+        return (0..<42).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+    }
+    private var weeks: [[Date]] {
+        stride(from: 0, to: 42, by: 7).map { Array(gridDays[$0 ..< $0 + 7]) }
+    }
+    private var itemsByDay: [Date: [TimelineItem]] {
+        Dictionary(grouping: captures.filter { $0.capturedDate != nil }) {
+            cal.startOfDay(for: $0.capturedDate!)
+        }
+    }
+    private var weekdaySymbols: [String] {
+        let s = cal.shortWeekdaySymbols
+        let i = cal.firstWeekday - 1
+        return Array(s[i...] + s[..<i])
+    }
+    private var title: String {
+        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"
+        return f.string(from: month)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            weekdayRow
+            grid
+        }
+        .frame(minWidth: 720, minHeight: 520)
+    }
+
+    private func shift(_ n: Int) {
+        if let m = cal.date(byAdding: .month, value: n, to: month) { month = m }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(title).font(.largeTitle).fontWeight(.bold)
+            Spacer()
+            Button { shift(-1) } label: { Image(systemName: "chevron.left") }
+                .buttonStyle(.borderless)
+            Button("Today") { month = Date() }
+            Button { shift(1) } label: { Image(systemName: "chevron.right") }
+                .buttonStyle(.borderless)
+            Button { onClose() } label: { Label("Stream", systemImage: "list.bullet") }
+                .padding(.leading, 8)
+        }
+        .padding(16)
+    }
+
+    private var weekdayRow: some View {
+        HStack(spacing: 0) {
+            ForEach(weekdaySymbols, id: \.self) { d in
+                Text(d.uppercased())
+                    .font(.caption2).fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var grid: some View {
+        VStack(spacing: 0) {
+            ForEach(weeks.indices, id: \.self) { wi in
+                HStack(spacing: 0) {
+                    ForEach(weeks[wi], id: \.self) { day in
+                        dayCell(day)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dayCell(_ day: Date) -> some View {
+        let inMonth = cal.isDate(day, equalTo: monthStart, toGranularity: .month)
+        let isToday = cal.isDateInToday(day)
+        let items = itemsByDay[cal.startOfDay(for: day)] ?? []
+        VStack(alignment: .leading, spacing: 2) {
+            dayNumber(day, inMonth: inMonth, isToday: isToday)
+            ForEach(items.prefix(3)) { chip($0) }
+            if items.count > 3 {
+                Text("+\(items.count - 3) more")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(isToday ? Color.red.opacity(0.06) : Color.clear)
+        .border(Color(nsColor: .separatorColor).opacity(0.4), width: 0.5)
+        .contentShape(Rectangle())
+        .onTapGesture { onPickDay(day) }
+    }
+
+    @ViewBuilder
+    private func dayNumber(_ day: Date, inMonth: Bool, isToday: Bool) -> some View {
+        let n = "\(cal.component(.day, from: day))"
+        if isToday {
+            Text(n).font(.callout).fontWeight(.bold).foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.red))
+        } else {
+            Text(n).font(.callout)
+                .foregroundStyle(inMonth ? .primary : .tertiary)
+                .padding(.leading, 3)
+        }
+    }
+
+    private func chip(_ item: TimelineItem) -> some View {
+        HStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(chipColor(item))
+                .frame(width: 3, height: 11)
+            Text(chipText(item))
+                .font(.caption2).lineLimit(1)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func chipColor(_ item: TimelineItem) -> Color {
+        switch item {
+        case .fragment(let f): return FragmentStyle.color(f.type)
+        case .recording: return .secondary
+        }
+    }
+    private func chipText(_ item: TimelineItem) -> String {
+        switch item {
+        case .fragment(let f): return f.displayText
+        case .recording(let r): return r.snippet
+        }
     }
 }
