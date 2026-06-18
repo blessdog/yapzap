@@ -458,31 +458,43 @@ struct ReviewView: View {
         .frame(minWidth: 360, minHeight: 360)
     }
 
+    @ViewBuilder
     private var devicePill: some View {
         let connected = state.deviceConnected
         let st = state.deviceStatus
         let freeable = connected && (st?.hasFreeable ?? false)
-        return HStack(spacing: 8) {
-            Image(systemName: connected ? "externaldrive.fill.badge.checkmark"
-                                        : "externaldrive")
-                .foregroundStyle(connected ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(connected ? "Recorder connected" : "Recorder not connected")
+        HStack(spacing: 8) {
+            if state.isBusy {
+                // Processing: spinner + what's happening, so the lag between
+                // "connected" and recordings/transcripts appearing is visible.
+                ProgressView().controlSize(.small).scaleEffect(0.8)
+                Text(state.status.isEmpty ? "Working…" : state.status)
                     .font(.caption).fontWeight(.medium)
-                if freeable {
-                    Text("\(st?.clearable ?? 0) clip(s) ready to clear")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            } else {
+                Image(systemName: connected ? "externaldrive.fill.badge.checkmark"
+                                            : "externaldrive")
+                    .foregroundStyle(connected ? .green : .secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(connected ? "Recorder connected" : "Recorder not connected")
+                        .font(.caption).fontWeight(.medium)
+                    if freeable {
+                        Text("\(st?.clearable ?? 0) clip(s) ready to clear")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
-            }
-            Spacer()
-            if freeable {
-                Button("Free up space") { showFreeConfirm = true }
-                    .controlSize(.small)
-                    .disabled(state.isBusy)
+                Spacer()
+                if freeable {
+                    Button("Free up space") { showFreeConfirm = true }
+                        .controlSize(.small)
+                }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.bar)
+        .animation(.easeInOut(duration: 0.2), value: state.isBusy)
     }
 
     // MARK: empty-state copy
@@ -722,16 +734,23 @@ struct FragmentDetail: View {
 /// A raw recording that produced no fragment — shown so nothing is invisible.
 struct RecordingRow: View {
     let recording: Recording
+    private var notReady: Bool {
+        recording.phase == .noSpeech || recording.phase == .failed
+            || recording.phase == .pending
+    }
+    private var iconColor: Color {
+        recording.phase == .failed ? .orange : .secondary
+    }
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: recording.isNoSpeech ? "mic.slash" : "waveform")
-                .foregroundStyle(.secondary)
+            Image(systemName: recording.rowIcon)
+                .foregroundStyle(iconColor)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(recording.snippet)
                     .lineLimit(2)
                     .foregroundStyle(.secondary)
-                    .italic(recording.isNoSpeech)
+                    .italic(notReady)
                 HStack(spacing: 6) {
                     Text(recording.capturedAt.prettyTimestamp)
                     Text("· recording")
@@ -748,20 +767,39 @@ struct RecordingDetail: View {
     @EnvironmentObject var audio: AudioPlayer
     @State private var yap: YapDetail?
 
+    private var headerLabel: String {
+        switch recording.phase {
+        case .failed: return "Couldn’t transcribe"
+        case .pending: return "Transcribing…"
+        default: return "Recording"
+        }
+    }
+    private var statusMessage: String {
+        switch recording.phase {
+        case .transcribed:
+            return "No idea was extracted from this one yet — here's the raw capture, kept so nothing you said goes missing."
+        case .noSpeech:
+            return "No speech was detected in this clip."
+        case .failed:
+            return "We couldn't reach the transcription service for this clip — it'll retry automatically next time you ingest. The audio is safe; tap play to hear it."
+        case .pending:
+            return "This clip is still being transcribed. It'll fill in shortly."
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Label("Recording", systemImage: "waveform")
-                        .font(.headline).foregroundStyle(.secondary)
+                    Label(headerLabel, systemImage: recording.rowIcon)
+                        .font(.headline)
+                        .foregroundStyle(recording.phase == .failed ? .orange : .secondary)
                     Spacer()
                     Text(recording.capturedAt.prettyTimestamp)
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
 
-                Text(recording.isNoSpeech
-                     ? "No speech was detected in this clip."
-                     : "No idea was extracted from this one yet — here's the raw capture, kept so nothing you said goes missing.")
+                Text(statusMessage)
                     .font(.callout).foregroundStyle(.secondary)
 
                 if let yap {
@@ -777,7 +815,7 @@ struct RecordingDetail: View {
                     }
                 }
 
-                if !recording.isNoSpeech {
+                if recording.phase == .transcribed {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Transcript — your exact words")

@@ -57,7 +57,9 @@ final class AppState: ObservableObject {
     func ingestNow(auto: Bool = false) {
         guard !isBusy else { return }
         isBusy = true
-        status = auto ? "Recorder detected — importing…" : "Importing & organizing…"
+        status = auto ? "Recorder connected — pulling in recordings…"
+                      : "Importing & transcribing…"
+        startProgressPolling()
         Task.detached {
             let result = Engine.ingestAndOrganize()
             await MainActor.run {
@@ -67,6 +69,21 @@ final class AppState: ObservableObject {
                 if !result.ok {
                     self.status = "Last run had errors"
                 }
+            }
+        }
+    }
+
+    /// While the pipeline runs, re-read the DB every couple seconds so new
+    /// recordings and transcripts visibly appear as python commits them —
+    /// giving real "it's processing / coming through" feedback, not a frozen
+    /// wait. python commits per clip, so the stream fills in incrementally.
+    private func startProgressPolling() {
+        Task { @MainActor in
+            while isBusy {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard isBusy else { break }
+                fragments = Database.fragments()
+                recordings = Database.recordings()
             }
         }
     }

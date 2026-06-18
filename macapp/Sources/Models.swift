@@ -38,11 +38,42 @@ struct Recording: Identifiable, Hashable {
     let status: String   // transcribed | empty | imported | error
 
     var capturedDate: Date? { capturedAt.parsedTimestamp }
-    var isNoSpeech: Bool {
-        status == "empty"
-            || transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+    enum Phase { case transcribed, noSpeech, failed, pending }
+
+    /// What state this recording is really in — so a *failed* or *still-cooking*
+    /// clip is never mislabeled "no speech". (status: transcribed|empty|error|imported)
+    var phase: Phase {
+        switch status {
+        case "empty": return .noSpeech
+        case "error": return .failed
+        case "imported": return .pending
+        default:
+            return transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .noSpeech : .transcribed
+        }
     }
-    var snippet: String { isNoSpeech ? "(no speech captured)" : transcript }
+
+    var isNoSpeech: Bool { phase == .noSpeech }
+
+    /// One-line text for a row.
+    var snippet: String {
+        switch phase {
+        case .transcribed: return transcript
+        case .noSpeech: return "No speech detected"
+        case .failed: return "Couldn’t transcribe — will retry"
+        case .pending: return "Transcribing…"
+        }
+    }
+
+    var rowIcon: String {
+        switch phase {
+        case .transcribed: return "waveform"
+        case .noSpeech: return "mic.slash"
+        case .failed: return "exclamationmark.arrow.circlepath"
+        case .pending: return "ellipsis"
+        }
+    }
 }
 
 /// Snapshot of what's freeable on the recorder (decoded from `device-status
