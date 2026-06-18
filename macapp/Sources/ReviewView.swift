@@ -60,6 +60,8 @@ struct ReviewView: View {
     @State private var showCalendar = false
     @State private var calendarDate = Date()
     @State private var showFreeConfirm = false
+    // Rediscover: which day's card the user has dismissed (-1 = none).
+    @AppStorage("rediscoverDismissedDay") private var rediscoverDismissedDay = -1
 
     // MARK: filtering
     //
@@ -151,6 +153,33 @@ struct ReviewView: View {
         }
         return dict.map { (label: $0.key, items: $0.value) }
             .sorted { (order[$0.label] ?? .distantPast) > (order[$1.label] ?? .distantPast) }
+    }
+
+    // MARK: rediscover
+
+    /// A stable "day number" so the resurfaced card is the same all day and
+    /// rotates to a new one tomorrow.
+    private var todayIndex: Int { Int(Date().timeIntervalSinceReferenceDate / 86400) }
+
+    /// Only resurface on the clean default stream — never while you're actively
+    /// filtering or searching.
+    private var showRediscover: Bool {
+        search.isEmpty && selectedTypes.isEmpty && dayFilter == nil
+            && !showArchived && rediscoverDismissedDay != todayIndex
+    }
+
+    /// An old, still-active fragment that's had time to incubate (14+ days),
+    /// picked deterministically per day so it's calm, not flickery.
+    private var rediscoverFragment: Fragment? {
+        guard showRediscover else { return nil }
+        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date())
+            ?? Date()
+        let eligible = state.fragments
+            .filter { $0.state == "active" }
+            .filter { ($0.capturedDate ?? .distantFuture) < cutoff }
+            .sorted { $0.capturedAt < $1.capturedAt }   // oldest first
+        guard !eligible.isEmpty else { return nil }
+        return eligible[todayIndex % eligible.count]
     }
 
     /// Resolve the selection against ALL items (not just the filtered set) so
@@ -257,6 +286,20 @@ struct ReviewView: View {
                                    description: Text(emptyHint))
         } else {
             List(selection: $selection) {
+                if let r = rediscoverFragment {
+                    RediscoverCard(
+                        fragment: r,
+                        onOpen: { selection = "f\(r.id)" },
+                        onDismiss: {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                rediscoverDismissedDay = todayIndex
+                            }
+                        }
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8))
+                    .selectionDisabled()
+                }
                 ForEach(groups, id: \.label) { group in
                     Section {
                         ForEach(group.items) { item in
@@ -461,6 +504,55 @@ struct ReviewView: View {
         if dayFilter != nil { return "Nothing captured on this day." }
         if !selectedTypes.isEmpty { return "None of those types here — tap the lit pills to clear them." }
         return "Plug in the recorder, or hit refresh."
+    }
+}
+
+/// "Remember this?" — a calm card that resurfaces an old fragment, on-thesis:
+/// the value is in revisiting your own gold after it's had time to incubate.
+struct RediscoverCard: View {
+    let fragment: Fragment
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+
+    private var relativeAge: String {
+        guard let d = fragment.capturedDate else { return "" }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f.localizedString(for: d, relativeTo: Date())
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Remember this?", systemImage: "sparkles")
+                        .font(.caption).fontWeight(.semibold)
+                        .foregroundStyle(.purple)
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Not now")
+                }
+                Text(fragment.displayText)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 5) {
+                    Image(systemName: FragmentStyle.icon(fragment.type))
+                        .foregroundStyle(FragmentStyle.color(fragment.type))
+                    Text(relativeAge)
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(Color.purple.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
     }
 }
 
