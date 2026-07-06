@@ -1,9 +1,13 @@
 import Foundation
 
-/// Where the Python pipeline + its data live. Hardcoded for the v1 personal
-/// build; the Mac app reuses the proven engine rather than reimplementing it.
+/// Where the Python pipeline + its data live. The Mac app reuses the proven
+/// engine rather than reimplementing it. Defaults to ~/projects/recorder so
+/// the same build works on any Mac; override with YAPZAP_ROOT if the project
+/// lives elsewhere. (App is unsandboxed, so NSHomeDirectory() is the real home.)
 enum Paths {
-    static let projectRoot = "/Users/SSDrive/projects/recorder"
+    static let projectRoot =
+        ProcessInfo.processInfo.environment["YAPZAP_ROOT"]
+        ?? NSHomeDirectory() + "/projects/recorder"
     static var python: String { projectRoot + "/.venv/bin/python" }
     static var dbPath: String { projectRoot + "/library/recorder.db" }
     static let ffmpeg = "/opt/homebrew/bin/ffmpeg"

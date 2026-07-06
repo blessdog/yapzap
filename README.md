@@ -47,3 +47,24 @@ python3 -m recorder show 12                   # full transcript for one yap
 
 Captured audio and the database live under `library/` (gitignored — it's yours).
 The hardware device is read-only to this tool and is never modified.
+
+## Setting up on a new Mac (Apple Silicon)
+
+```bash
+brew install ffmpeg xcodegen
+git clone git@github.com:blessdog/yapzap.git ~/projects/recorder
+cd ~/projects/recorder
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env   # then fill in the Deepgram + Anthropic keys
+
+# Build the Mac app
+cd macapp && xcodegen generate
+xcodebuild -project YapZapp.xcodeproj -scheme YapZapp -configuration Debug build
+```
+
+Clone to `~/projects/recorder` — the Mac app looks for the Python engine and
+database there by default (set `YAPZAP_ROOT` to override).
+
+Note: `library/` (your audio + database) is **not** in git. Each Mac starts
+with an empty library; to move your history, copy `library/` across manually
+(AirDrop, external drive) or re-ingest from the recorder's backups.
