@@ -4,12 +4,29 @@ normalize the recorder's WAV files for transcription."""
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 # Recorder filenames are the capture time: YYYYMMDD-HHMMSS.wav
 _TS_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$")
+
+
+def _find_ffmpeg() -> str:
+    """Locate ffmpeg even under the minimal PATH a GUI-spawned process gets.
+
+    When YapZapp launches the engine, PATH lacks /opt/homebrew/bin, so a bare
+    "ffmpeg" fails despite a healthy install. Check PATH first, then the
+    standard Homebrew locations (Apple Silicon, then Intel).
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+        if Path(candidate).is_file():
+            return candidate
+    raise RuntimeError("ffmpeg not found — install it (brew install ffmpeg).")
 
 
 def captured_at_from_filename(filename: str) -> str | None:
@@ -35,9 +52,10 @@ def normalize_to_tempwav(src: Path) -> Path:
     os.close(fd)
     tmp = Path(tmp_name)
     try:
+        ffmpeg = _find_ffmpeg()
         subprocess.run(
             [
-                "ffmpeg", "-y", "-loglevel", "error",
+                ffmpeg, "-y", "-loglevel", "error",
                 "-i", str(src),
                 "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
                 "-f", "wav", str(tmp),
@@ -45,9 +63,9 @@ def normalize_to_tempwav(src: Path) -> Path:
             check=True,
             capture_output=True,
         )
-    except FileNotFoundError as e:
+    except RuntimeError:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError("ffmpeg not found — install it (brew install ffmpeg).") from e
+        raise
     except subprocess.CalledProcessError as e:
         tmp.unlink(missing_ok=True)
         msg = e.stderr.decode("utf-8", "replace").strip() if e.stderr else str(e)
