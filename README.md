@@ -1,70 +1,69 @@
-# Recorder
+# yapzap
 
-A creativity instrument, not a productivity app. Carry a hardware voice
-recorder all day; plug it into the Mac; the app ingests, transcribes, and
-(eventually) helps you organize and *formalize* the ideas you barked into it.
+A creativity instrument, not a productivity app. Carry a hardware
+voice recorder all day; plug it into the Mac; the app ingests,
+transcribes, and lifts the gold — jokes, ideas, insights, practical
+scraps — out of whatever you barked into it.
 
-See **[VISION.md](VISION.md)** for the thesis and design principles, and
-**[docs/the-science.md](docs/the-science.md)** for the cognitive-science basis.
+The thesis and design principles live in **[VISION.md](VISION.md)**;
+the cognitive-science basis (why voice-first capture, referenced) in
+**[docs/the-science.md](docs/the-science.md)**.
 
-## Slice 1 — reliable capture
-
-Ingest → repair audio → transcribe → land in a local SQLite source-of-truth.
-The audio is copied and the row is committed **before** transcription, so a clip
-is never lost if transcription fails.
-
-## Slice 2 — the mind (LLM extraction)
-
-`organize` reads each transcript and asks Claude (Opus 4.8) to lift the *gold* —
-**jokes, ideas, insights, and practical scraps** — into typed `fragments`. The
-raw transcript is the source of truth and is **never altered**; fragments are a
-view derived on top. Idempotent and re-runnable (bump the prompt version to
-re-process). No recombination, formalize-step, or UI yet — those come next.
-
-### Requirements
-- Python 3.11+
-- `ffmpeg` (`brew install ffmpeg`) — repairs the recorder's broken WAV headers
-- Slice 1 (ingest/transcribe) is stdlib-only. Slice 2 needs `pip install -r requirements.txt`.
-- `DEEPGRAM_API_KEY` (transcription) and `ANTHROPIC_API_KEY` (the mind) in `.env`
-  (see `.env.example`)
-
-### Usage
-```bash
-# Ingest from the plugged-in recorder (default /Volumes/Recorder/record)
-python3 -m recorder ingest
-
-# Or from a backup folder (recurses for *.wav) — handy when unplugged
-python3 -m recorder ingest --source ~/yapzap/raw
-
-python3 -m recorder ingest --no-transcribe   # import only
-python3 -m recorder organize                  # extract fragments (LLM)
-python3 -m recorder organize --limit 1        # ...just one, to spot-check
-python3 -m recorder stats                     # counts by status + fragment types
-python3 -m recorder list                      # recent yaps
-python3 -m recorder fragments --type joke     # extracted fragments, filterable
-python3 -m recorder show 12                   # full transcript for one yap
+```
+recorder mounts ─▶ copy + repair audio ─▶ commit the capture row
+                                              │
+                          Deepgram nova-3 transcription (retried)
+                                              │
+                        the mind: LLM lifts typed fragments
+                        (joke / idea / insight / practical)
+                                              │
+                     menu-bar app: one continuous timeline
 ```
 
-Captured audio and the database live under `library/` (gitignored — it's yours).
-The hardware device is read-only to this tool and is never modified.
+## The journey
 
-## Setting up on a new Mac (Apple Silicon)
+**The reframe came first.** An early version pointed at productivity —
+tasks, notes, organization. Wrong instrument. The reframe that stuck:
+this is for *idea formalization* — the recorder catches raw creative
+material at the moment it occurs, and the machine's job is to make
+sure nothing captured is ever lost or invisible.
 
-```bash
-brew install ffmpeg xcodegen
-git clone git@github.com:blessdog/yapzap.git ~/projects/recorder
-cd ~/projects/recorder
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # then fill in the Deepgram + Anthropic keys
+**Capture is sacred, so capture commits first.** The audio file is
+copied and its row written to SQLite *before* transcription is
+attempted. Transcription can fail (and did — big clips broke the pipe
+mid-upload until retries landed); the recording survives regardless.
+Same doctrine as the film pipeline's untouched call audio: the raw
+material is the source of truth and is never altered — fragments are
+a layer on top.
 
-# Build the Mac app
-cd macapp && xcodegen generate
-xcodebuild -project YapZapp.xcodeproj -scheme YapZapp -configuration Debug build
-```
+**Three bugs worth remembering:**
 
-Clone to `~/projects/recorder` — the Mac app looks for the Python engine and
-database there by default (set `YAPZAP_ROOT` to override).
+- **The broken-WAV gotcha.** The hardware recorder produces WAV files
+  with lying headers when it loses power mid-recording; ffmpeg
+  repairs them on ingest. Found by mining the v0 shell-script
+  pipeline this app replaced.
+- **The WAL trap.** The Python engine wrote SQLite in WAL mode; the
+  Swift app reads the same DB read-only — and a read-only connection
+  can't open a WAL database without its sidecar files, so the app
+  showed *nothing* while the data sat there intact. DELETE journal
+  mode made cross-process reads reliable. Mechanism, not mystery:
+  two processes, two runtimes, one file — journal mode is part of the
+  contract.
+- **The GUI PATH trap.** The app spawns the Python engine, and
+  GUI-spawned processes get a minimal PATH without `/opt/homebrew/bin`
+  — so ffmpeg "didn't exist" only when launched from the app. Binaries
+  are now found explicitly.
 
-Note: `library/` (your audio + database) is **not** in git. Each Mac starts
-with an empty library; to move your history, copy `library/` across manually
-(AirDrop, external drive) or re-ingest from the recorder's backups.
+**The surface earned its shape.** The review UI went through visible
+churn — day pins that swallowed the list, filters as a dropdown,
+empty-week landings — and settled on one continuous stream, newest
+first, filters as flat toggle pills, un-mined recordings shown so
+nothing captured is invisible, and a "rediscover" slot that resurfaces
+an old gem at the top. A calendar month view exists for time travel.
+
+## Status
+
+Working daily-use prototype: mount → ingest → transcribe → fragments →
+review all run. The extraction prompt and the review surface keep
+evolving with use. Screenshot of the app coming; the hardware is a
+cheap dictaphone, which is the point.
